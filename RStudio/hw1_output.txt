@@ -1,0 +1,74 @@
+
+> ### Code for CSE-6242 (Data and Visual Analytics) Homework 1 ###
+> # dgiron3
+> # =============================== #
+> # Problem 1 #
+> 
+> w1 = seq(0,1 .... [TRUNCATED] 
+
+> w2 = seq(0,1, length.out = 11)
+
+> stopifnot(w1 == w2)
+
+> print(w1)
+ [1] 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0
+
+> # =============================== #
+> # Problem 2 #
+> 
+> log_gamma_loop = function(n){
++   if (n == 1) return(0)
++   n = n - 1
++   sum = 0
++   for ( .... [TRUNCATED] 
+
+> # =============================== #
+> # Problem 3 #
+> 
+> log_gamma_recursive = function(n){
++   if (n == 1) return(0)
++   n = n - 1
++   return(log(n .... [TRUNCATED] 
+
+> # =============================== #
+> # Problem 4 #
+> 
+> sum_log_gamma_loop = function(n){
++   sum = 0
++   for (i in 1:n){
++     sum = sum + log_gam .... [TRUNCATED] 
+
+> sum_log_gamma_recursive = function(n){
++   sum = 0
++   for (i in 1:n){
++     sum = sum + log_gamma_recursive(i)
++   }
++   return(sum)
++ }
+
+> ## Code Implementation of 2-4
+> for (i in 1:5){
++   stopifnot(all.equal(log_gamma_loop(i), lgamma(i)))
++   stopifnot(all.equal(log_gamma_recursive(i .... [TRUNCATED] 
+
+> print("Tests passed!")
+[1] "Tests passed!"
+
+> # =============================== #
+> # Problem 5 #
+> 
+> require(reshape2)
+
+> require(ggplot2)
+
+> sum_lgamma <- function(n){
++   if (n < 1){
++     stop("value out of range")
++   }
++   sum <- 0
++   for (i in seq(1,n,1)){
++     sum <- sum + lgamma( .... [TRUNCATED] 
+
+> # time_sum_lgamma = system.time(sum_lgamma(1))[1]
+> # time_sum_log_gamma_loop = system.time(sum_log_gamma_loop(1))[1]
+> # time_sum_log_gamma_recursi .... [TRUNCATED] 
