@@ -87,7 +87,7 @@ class NN:
         self.numStates = numStates
         self.numActions = numActions
         self.model = self._makeModel()
-        self.model.load_weights("model.h5")
+        #self.model.load_weights("model.h5")
 
     def train(self, x, y, epoch=1, verbose=0):
         self.model.fit(x, y, batch_size=64, epochs=epoch, verbose=verbose)

@@ -1,0 +1,723 @@
+---
+title: 'Project 2: Modeling and Evaluation'
+subtitle: '<p>CSE6242 - Data and Visual Analytics</p><p>Due: Friday, April 21, 2017
+  at 11:59 PM UTC-12:00 on T-Square</p>'
+output:
+  html_notebook: default
+  html_document: default
+  pdf_document: default
+---
+
+# Data
+
+We will use the same dataset as Project 1: [`movies_merged`](https://s3.amazonaws.com/content.udacity-data.com/courses/gt-cs6242/project/movies_merged).
+
+# Objective
+
+Your goal in this project is to build a linear regression model that can predict the `Gross` revenue earned by a movie based on other variables. You may use R packages to fit and evaluate a regression model (no need to implement regression yourself). Please stick to linear regression, however.
+
+# Instructions
+
+You should be familiar with using an [RMarkdown](http://rmarkdown.rstudio.com) Notebook by now. Remember that you have to open it in RStudio, and you can run code chunks by pressing *Cmd+Shift+Enter*.
+
+Please complete the tasks below and submit this R Markdown file (as **pr2.Rmd**) containing all completed code chunks and written responses, as well as a PDF export of it (as **pr2.pdf**) which should include all of that plus output, plots and written responses for each task.
+
+_Note that **Setup** and **Data Preprocessing** steps do not carry any points, however, they need to be completed as instructed in order to get meaningful results._
+
+# Setup
+
+Same as Project 1, load the dataset into memory:
+
+```{r}
+load('movies_merged')
+```
+
+This creates an object of the same name (`movies_merged`). For convenience, you can copy it to `df` and start using it:
+
+```{r}
+df = movies_merged
+rm(movies_merged)
+cat("Dataset has", dim(df)[1], "rows and", dim(df)[2], "columns", end="\n", file="")
+colnames(df)
+```
+
+## Load R packages
+
+Load any R packages that you will need to use. You can come back to this chunk, edit it and re-run to load any additional packages later.
+
+```{r}
+library(ggplot2)
+library(lattice)
+library(mlbench)
+library(caret)
+library(randomForest)
+```
+
+If you are using any non-standard packages (ones that have not been discussed in class or explicitly allowed for this project), please mention them below. Include any special instructions if they cannot be installed using the regular `install.packages('<pkg name>')` command.
+
+**Non-standard packages used**: lattice (required for caret), mlbench, caret, randomForest
+
+# Data Preprocessing
+
+Before we start building models, we should clean up the dataset and perform any preprocessing steps that may be necessary. Some of these steps can be copied in from your Project 1 solution. It may be helpful to print the dimensions of the resulting dataframe at each step.
+
+## 1. Remove non-movie rows
+
+```{r}
+# TODO: Remove all rows from df that do not correspond to movies
+df <- subset(df, Type == "movie")
+```
+
+## 2. Drop rows with missing `Gross` value
+
+Since our goal is to model `Gross` revenue against other variables, rows that have missing `Gross` values are not useful to us.
+
+```{r}
+# TODO: Remove rows with missing Gross value
+df <- subset(df, !is.na(Gross))
+```
+
+## 3. Exclude movies released prior to 2000
+
+Inflation and other global financial factors may affect the revenue earned by movies during certain periods of time. Taking that into account is out of scope for this project, so let's exclude all movies that were released prior to the year 2000 (you may use `Released`, `Date` or `Year` for this purpose).
+
+```{r}
+# TODO: Exclude movies released prior to 2000
+df <- subset(df, Year >= 2000)
+```
+
+## 4. Eliminate mismatched rows
+
+_Note: You may compare the `Released` column (string representation of release date) with either `Year` or `Date` (numeric representation of the year) to find mismatches. The goal is to avoid removing more than 10% of the rows._
+
+```{r}
+# TODO: Remove mismatched rows
+mismatchNAgross_ind = (!is.na(df$Released) & is.na(df$Gross) & abs(as.numeric(format(df$Released, '%Y')) - df$Year) > 0)
+df2 = df[!mismatchNAgross_ind,]
+print(paste('Number of Rows removed without Gross Values =', dim(df)[1] - dim(df2)[1]))
+numWithGross = sum(!is.na(df$Gross))
+tenPerGross = numWithGross/10
+diff = -1
+NUM = tenPerGross + 1
+while(NUM > tenPerGross){
+  diff = diff + 1
+  NUM = sum(!is.na(df2$Released) & !is.na(df2$Gross) & abs(as.numeric(format(df2$Released, '%Y')) - df2$Year) > diff)
+  mismatchWgross_ind = (!is.na(df2$Released) & !is.na(df2$Gross) & abs(as.numeric(format(df2$Released, '%Y')) - df2$Year) > diff)
+}
+df3 = df2[!mismatchWgross_ind,]
+print(paste(round(NUM/numWithGross*100, 2), '% of Gross valued records removed', sep = ''))
+print(paste('Number of Rows removed with Gross Values =', dim(df2)[1] - dim(df3)[1]))
+print(paste('Total number of rows removed =', dim(df)[1] - dim(df3)[1]))
+df = df3
+rm(diff, df2, df3, mismatchNAgross_ind, mismatchWgross_ind, NUM, numWithGross, tenPerGross)
+```
+
+## 5. Drop `Domestic_Gross` column
+
+`Domestic_Gross` is basically the amount of revenue a movie earned within the US. Understandably, it is very highly correlated with `Gross` and is in fact equal to it for movies that were not released globally. Hence, it should be removed for modeling purposes.
+
+```{r}
+# TODO: Exclude the `Domestic_Gross` column
+df <- df[,!names(df) %in% "Domestic_Gross"]
+```
+
+## 6. Process `Runtime` column
+
+```{r}
+# TODO: Replace df$Runtime with a numeric column containing the runtime in minutes
+df$Runtime = as.numeric(gsub('\\D','',df$Runtime))
+```
+
+Perform any additional preprocessing steps that you find necessary, such as dealing with missing values or highly correlated columns (feel free to add more code chunks, markdown blocks and plots here as necessary).
+
+```{r}
+# TODO(optional): Additional preprocessing
+# Drop columns with more than 8% NA values
+df = df[,colMeans(is.na(df)) < 0.08]
+
+# Drop remaining records with NA values
+df = na.omit(df)
+```
+
+_**Note**: Do NOT convert categorical variables (like `Genre`) into binary columns yet. You will do that later as part of a model improvement task._
+
+## Final preprocessed dataset
+
+Report the dimensions of the preprocessed dataset you will be using for modeling and evaluation, and print all the final column names. (Again, `Domestic_Gross` should not be in this list!)
+
+```{r}
+# TODO: Print the dimensions of the final preprocessed dataset and column names
+print(paste(dim(df)[1],"rows and",dim(df)[2],"columns"))
+```
+```{r}
+names(df)
+```
+
+
+# Evaluation Strategy
+
+In each of the tasks described in the next section, you will build a regression model. In order to compare their performance, use the following evaluation procedure every time:
+
+1. Randomly divide the rows into two sets of sizes 5% and 95%.
+2. Use the first set for training and the second for testing.
+3. Compute the Root Mean Squared Error (RMSE) on the train and test sets.
+4. Repeat the above data partition and model training and evaluation 10 times and average the RMSE results so the results stabilize.
+5. Repeat the above steps for different proportions of train and test sizes: 10%-90%, 15%-85%, ..., 95%-5% (total 19 splits including the initial 5%-95%).
+6. Generate a graph of the averaged train and test RMSE as a function of the train set size (%).
+
+You can define a helper function that applies this procedure to a given model and reuse it.
+
+# Tasks
+
+Each of the following tasks is worth 20 points. Remember to build each model as specified, evaluate it using the strategy outlined above, and plot the training and test errors by training set size (%).
+
+## 1. Numeric variables
+
+Use linear regression to predict `Gross` based on all available _numeric_ variables.
+
+*Feature Selection techniques adopted from the article: http://machinelearningmastery.com/feature-selection-with-the-caret-r-package/
+
+```{r}
+# Prepare Data for Question 1 (Numerical data with additional feature selection)
+df_nums = df[,sapply(df, is.numeric)]
+correlationMatrix = cor(df_nums[,1:8])
+print(correlationMatrix)
+highlyCorrelated = findCorrelation(correlationMatrix, cutoff = 0.8)
+print(highlyCorrelated)
+rm(correlationMatrix,highlyCorrelated)
+# Remove Highly Correlated Features (3 and 6 Correspond to imdbRating and tomatoUserRating)
+# Also removing Date because this is almost identical to Year
+df_nums <- df_nums[,!names(df_nums) %in% c("imdbRating","tomatoUserRating","Date")]
+```
+
+```{r}
+# Uses Random Forest Algorithm to Perform Feature Selection to Minimize RMSE (runs for a couple of minutes)
+# This also ranks the features in order of importance (metric = information)
+control = rfeControl(functions=rfFuncs, method="cv", number=5)
+results = rfe(df_nums[,!names(df_nums) %in% "Gross"], df_nums$Gross, sizes = c(1:dim(df_nums)[2]-1), rfeControl = control)
+print(results)
+predictors(results)
+plot(results, type=c("g","o"))
+rm(results,control)
+```
+
+The additional feature selection provided useful information for numerical columns.  I was able to narrow down the number of features to 6.  Also, I was able to find that the rankings of the features in terms of Random Forest importance : Budget, imdbVotes, tomatoUserReviews, Year, tomatoUserMeter, Runtime.  It seems the best model can be found when keeping all of these 6  features. So no additional feature removal is required.  I will use this information in terms to maximize feature transformation results.
+
+```{r}
+# TODO: Build & evaluate model 1 (numeric variables only)
+
+model1 <- function(data = df_nums, train_perc = 1, iterations = 10){
+  numRecords = dim(data)[1]
+  numTrain = round(numRecords*train_perc)
+  trn_rmse_list = rep(0, times = 0)
+  tst_rmse_list = rep(0, times = 0)
+  for(i in seq(1:iterations)){
+    train_ind = sample(1:numRecords, size = numTrain)
+    train = data[train_ind,]
+    test = data[-train_ind,]
+    M = lm(Gross ~ . , train)
+    trn_rmse_list[i] = sqrt(mean(residuals(M)^2))
+    predictions = predict(M,test)
+    tst_rmse_list[i] = sqrt(mean((test$Gross - predictions)^2))
+  }
+  train_rmse = mean(trn_rmse_list)
+  test_rmse = mean(tst_rmse_list)
+  return(as.data.frame(list(train_perc=train_perc,train_rmse=train_rmse,test_rmse=test_rmse)))
+}
+
+question1 <- function(data = df_nums, iterations = 10){
+  q1 = model1(data, 0.05, iterations)
+  for(i in seq(0.1, 0.95, by = 0.05)){
+    a = rbind(q1, model1(data, i, iterations))
+    q1 = a
+  }
+  return(as.data.frame(q1, row.names = NULL))
+}
+```
+```{r}
+ggplot(data = question1(df_nums, 10), aes(x = train_perc)) +
+  geom_line(aes(y = train_rmse, color = 'train_rmse')) +
+  geom_line(aes(y = test_rmse, color = 'test_rmse')) +
+  labs(x = 'Training Data Size Percentage', y = 'RMSE', title = 'RMSE (Mean of 10 iterations: Train/Test) vs. Data Sizes')
+```
+
+```{r}
+ggplot(data = question1(df_nums, 1000), aes(x = train_perc)) +
+  geom_line(aes(y = train_rmse, color = 'train_rmse')) +
+  geom_line(aes(y = test_rmse, color = 'test_rmse')) +
+  labs(x = 'Training Data Size Percentage', y = 'RMSE', title = 'RMSE (Mean of 1000 iterations: Train/Test) vs. Data Sizes')
+```
+
+The requirement was just 10 iterations, but 1000 average iterations gives a clearer picture of the model's performance.
+
+```{r}
+names(df_nums)
+```
+
+**Q**: List all the numeric variables you used.
+
+**A**: Year, Runtime, imdbVotes, tomatoUserMeter, tomatoUserReviews, Budget
+
+## 2. Feature transformations
+
+Try to improve the prediction quality from **Task 1** as much as possible by adding feature transformations of the numeric variables. Explore both numeric transformations such as power transforms and non-numeric transformations of the numeric variables like binning (e.g. `is_budget_greater_than_3M`).
+
+```{r}
+# TODO: Build & evaluate model 2 (transformed numeric variables only)
+
+model2Power <- function(data = df_nums, train_perc = 1, iterations = 10){
+  numRecords = dim(data)[1]
+  numTrain = round(numRecords*train_perc)
+  trn_rmse_list = rep(0, times = 0)
+  tst_rmse_list = rep(0, times = 0)
+  for(i in seq(1:iterations)){
+    train_ind = sample(1:numRecords, size = numTrain)
+    train = data[train_ind,]
+    test = data[-train_ind,]
+    M = lm(Gross ~ . + (Budget + imdbVotes)^2 + I(Budget^2) + I(Budget^3) + I(imdbVotes^2), train)
+    trn_rmse_list[i] = sqrt(mean(residuals(M)^2))
+    predictions = predict(M,test)
+    tst_rmse_list[i] = sqrt(mean((test$Gross - predictions)^2))
+  }
+  train_rmse = mean(trn_rmse_list)
+  test_rmse = mean(tst_rmse_list)
+  return(as.data.frame(list(train_perc=train_perc,train_rmse=train_rmse,test_rmse=test_rmse)))
+}
+
+question2Power <- function(data = df_nums, iterations = 10){
+  q2 = model2Power(data, 0.05, iterations)
+  for(i in seq(0.1, 0.95, by = 0.05)){
+    a = rbind(q2, model2Power(data, i, iterations))
+    q2 = a
+  }
+  return(as.data.frame(q2, row.names = NULL))
+}
+```
+
+```{r}
+# Power Model
+ggplot(data = question2Power(df_nums, 10), aes(x = train_perc)) +
+  geom_line(aes(y = train_rmse, color = 'train_rmse')) +
+  geom_line(aes(y = test_rmse, color = 'test_rmse')) +
+  labs(x = 'Training Data Size Percentage', y = 'RMSE', title = 'RMSE (Mean of 10 iterations: Train/Test) vs. Data Sizes')
+```
+
+```{r}
+# Power Model
+ggplot(data = question2Power(df_nums, 1000), aes(x = train_perc)) +
+  geom_line(aes(y = train_rmse, color = 'train_rmse')) +
+  geom_line(aes(y = test_rmse, color = 'test_rmse')) +
+  labs(x = 'Training Data Size Percentage', y = 'RMSE', title = 'RMSE (Mean of 1000 iterations: Train/Test) vs. Data Sizes')
+```
+
+```{r}
+# Non-numeric Feature Transformations (Adding Explanatory Variables)
+
+df_nums2 = data.frame(is_budget_greater_than_5M = (df_nums$Budget > 5e6), 
+                      is_budget_greater_than_30M = (df_nums$Budget > 3e7),
+                      is_imdbVotes_greater_than_200k = (df_nums$imdbVotes > 200e3),
+                      is_imdbVotes_greater_than_100k = (df_nums$imdbVotes > 100e3),
+                      is_year_greater_than_2005 = (df_nums$Year > 2005),
+                      is_tomatoUserReviews_greater_than_100k = (df_nums$tomatoUserReviews>100e3),
+                      Gross = df_nums$Gross
+                      ) 
+
+
+model2NonNum <- function(data = df_nums2, train_perc = 1, iterations = 10){
+  numRecords = dim(data)[1]
+  numTrain = round(numRecords*train_perc)
+  trn_rmse_list = rep(0, times = 0)
+  tst_rmse_list = rep(0, times = 0)
+  for(i in seq(1:iterations)){
+    train_ind = sample(1:numRecords, size = numTrain)
+    train = data[train_ind,]
+    test = data[-train_ind,]
+    M = lm(Gross ~ . , train)
+    trn_rmse_list[i] = sqrt(mean(residuals(M)^2))
+    predictions = predict(M,test)
+    tst_rmse_list[i] = sqrt(mean((test$Gross - predictions)^2))
+  }
+  train_rmse = mean(trn_rmse_list)
+  test_rmse = mean(tst_rmse_list)
+  return(as.data.frame(list(train_perc=train_perc,train_rmse=train_rmse,test_rmse=test_rmse)))
+}
+
+question2NonNum <- function(data = df_nums2, iterations = 10){
+  q2 = model2NonNum(data, 0.05, iterations)
+  for(i in seq(0.1, 0.95, by = 0.05)){
+    a = rbind(q2, model2NonNum(data, i, iterations))
+    q2 = a
+  }
+  return(as.data.frame(q2, row.names = NULL))
+}
+```
+
+```{r}
+# Non-numerical Transformations
+ggplot(data = question2NonNum(df_nums2, 10), aes(x = train_perc)) +
+  geom_line(aes(y = train_rmse, color = 'train_rmse')) +
+  geom_line(aes(y = test_rmse, color = 'test_rmse')) +
+  labs(x = 'Training Data Size Percentage', y = 'RMSE', title = 'RMSE (Mean of 10 iterations: Train/Test) vs. Data Sizes')
+```
+
+```{r}
+# Non-numerical Transformations
+ggplot(data = question2NonNum(df_nums2, 1000), aes(x = train_perc)) +
+  geom_line(aes(y = train_rmse, color = 'train_rmse')) +
+  geom_line(aes(y = test_rmse, color = 'test_rmse')) +
+  labs(x = 'Training Data Size Percentage', y = 'RMSE', title = 'RMSE (Mean of 1000 iterations: Train/Test) vs. Data Sizes')
+```
+
+
+**Q**: Explain which transformations you used and why you chose them.
+
+**A**: I chose a power transformation of the squared combination of Budget and imdbVotes (Budget + imdbVotes)^2, Budget and imdbVotes squared separately, Budget cubed individually, along with the linear combination of the remaining four features.  I chose this transformation because it put heavy emphasis on the features that provided the most information gain (from random forest excersize in question 1).  I also performed a non-numerical transformations of the top 4 most important features with a little bit emphasis on the top two features (top two features received 2 differently categoried columns).  Pleasantly, the power transformation deemed to improve the RMSE results.  Unfortunately, the non-numerical transformations did not improve question 1.  In fact, the results were all over place in terms of high and inconsistent RMSE values.  That being said, the exercise was still worth-while.
+
+## 3. Non-numeric variables
+
+Write code that converts genre, actors, directors, and other categorical variables to columns that can be used for regression (e.g. binary columns as you did in Project 1). Also process variables such as awards into more useful columns (again, like you did in Project 1). Now use these converted columns only to build your next model.
+
+```{r}
+# TODO: Build & evaluate model 3 (converted non-numeric variables only)
+# Create Categorial Pre-transformation Dataframe (excluding particularly choiced columns based on intuition)
+df_cat = df[,!sapply(df, is.numeric)]
+df_cat <- df_cat[,!names(df_cat) %in% c("Title","Writer","Plot","Poster","Metascore","Type",
+                                        "tomatoConsensus","tomatoURL","Website","Response","imdbID","BoxOffice",
+                                        "Rated","Language","Country","Production","tomatoImage")]
+df_cat$Gross = df$Gross
+names(df_cat)
+```
+
+```{r}
+# Create Wins/Nominations Columns
+df_cat$Wins = rep(0, times = dim(df_cat)[1])
+df_cat$Nominations = rep(0, times = dim(df_cat)[1])
+for(i in seq(1:dim(df_cat)[1])){
+  wins = 0
+  nominations = 0
+  if(grepl("Won ", df_cat$Awards[i])){
+    wins = wins + as.numeric(gsub(".*Won(\\s)\\b(\\d+).*",
+                                  "\\2", df_cat$Awards[i], perl=TRUE))
+  }
+  if(grepl(" win", df_cat$Awards[i])){
+    wins = wins + as.numeric(gsub(".*\\b(\\d+)(\\s)win.*",
+                                  "\\1", df_cat$Awards[i], perl=TRUE))
+  }
+  if(grepl("Nominated for ", df_cat$Awards[i])){
+    nominations = nominations + as.numeric(gsub(".*Nominated for(\\s)\\b(\\d+).*",
+                                                "\\2", df_cat$Awards[i], perl=TRUE))
+  }
+  if(grepl(" nomination", df_cat$Awards[i])){
+    nominations = nominations + as.numeric(gsub(".*\\b(\\d+)(\\s)nomination.*",
+                                                "\\1", df_cat$Awards[i], perl=TRUE))
+  }
+  df_cat$Wins[i] = wins
+  df_cat$Nominations[i] = nominations
+}
+df_cat$Awards <- NULL
+rm(i,wins,nominations)
+names(df_cat)
+```
+
+```{r}
+# Create Binary Genre Columns for selected Genres
+Action = rep(0, times = dim(df_cat)[1])
+Adventure = rep(0, times = dim(df_cat)[1])
+Animation = rep(0, times = dim(df_cat)[1])
+Biography = rep(0, times = dim(df_cat)[1])
+Comedy = rep(0, times = dim(df_cat)[1])
+Crime = rep(0, times = dim(df_cat)[1])
+Documentary = rep(0, times = dim(df_cat)[1])
+Drama = rep(0, times = dim(df_cat)[1])
+Horror = rep(0, times = dim(df_cat)[1])
+Romance = rep(0, times = dim(df_cat)[1])
+Sci_Fi = rep(0, times = dim(df_cat)[1])
+Short = rep(0, times = dim(df_cat)[1])
+Thriller = rep(0, times = dim(df_cat)[1])
+Western = rep(0, times = dim(df_cat)[1])
+
+for(i in seq(1:dim(df_cat)[1])){
+  g = df_cat$Genre[i]
+  if(grepl("Ac",g)){Action[i] = 1}
+  if(grepl("Ad",g)){Adventure[i] = 1}
+  if(grepl("An",g)){Animation[i] = 1}
+  if(grepl("B",g)){Biography[i] = 1}
+  if(grepl("Co",g)){Comedy[i] = 1}
+  if(grepl("Cr",g)){Crime[i] = 1}
+  if(grepl("Do",g)){Documentary[i] = 1}
+  if(grepl("Dr",g)){Drama[i] = 1}
+  if(grepl("Ho",g)){Horror[i] = 1}
+  if(grepl("R",g)){Romance[i] = 1}
+  if(grepl("Sc",g)){Sci_Fi[i] = 1}
+  if(grepl("Sh",g)){Short[i] = 1}
+  if(grepl("T",g)){Thriller[i] = 1}
+  if(grepl("We",g)){Western[i] = 1}
+}
+
+df_cat$Action = Action
+df_cat$Adventure = Adventure
+df_cat$Animation = Animation
+df_cat$Biography = Biography
+df_cat$Comedy = Comedy
+df_cat$Crime = Crime
+df_cat$Documentary = Documentary
+df_cat$Drama = Drama
+df_cat$Horror = Horror
+df_cat$Romance = Romance
+df_cat$Sci_Fi = Sci_Fi
+df_cat$Short = Short
+df_cat$Thriller = Thriller
+df_cat$Western = Western
+df_cat$Genre <- NULL
+rm(i,g,Action,Adventure,Animation,Biography,Comedy,Crime,Documentary,Drama,Horror,Romance,Sci_Fi,Short,Thriller,Western)
+names(df_cat)
+```
+
+```{r}
+# Create Count Columns for selected Top Grossing Directors
+df_cat$DirectorCnt = rep(0, times = dim(df_cat)[1])
+for(i in seq(1:dim(df_cat)[1])){
+  g = df_cat$Director[i]
+  cnt = 0
+  if(grepl("Spielberg",g)){cnt = cnt + 1}
+  if(grepl("Peter Jackson",g)){cnt = cnt + 1}
+  if(grepl("Cameron",g)){cnt = cnt + 1}
+  if(grepl("Yates",g)){cnt = cnt + 1}
+  if(grepl("Bay",g)){cnt = cnt + 1}
+  if(grepl("Nolan",g)){cnt = cnt + 1}
+  if(grepl("Verbinski",g)){cnt = cnt + 1}
+  if(grepl("Ron Howard",g)){cnt = cnt + 1}
+  if(grepl("Burton",g)){cnt = cnt + 1}
+  if(grepl("Columbus",g)){cnt = cnt + 1}
+  if(grepl("Eastwood",g)){cnt = cnt + 1}
+  if(grepl("Dugan",g)){cnt = cnt + 1}
+  df_cat$DirectorCnt[i] = cnt
+}
+df_cat$Director <- NULL
+rm(i,g,cnt)
+```
+
+
+```{r}
+# Create Month Released Column
+df_cat$Month_Released = as.numeric(format(df_cat$Released, '%m'))
+df_cat$Released <- NULL
+names(df_cat)
+```
+
+```{r}
+# Create Count Columns for selected Top Grossing Actors
+df_cat$ActorCnt = rep(0, times = dim(df_cat)[1])
+for(i in seq(1:dim(df_cat)[1])){
+  g = df_cat$Actors[i]
+  cnt = 0
+  if(grepl("Cruise",g)){cnt = cnt + 3}
+  if(grepl("Roberts",g)){cnt = cnt + 2}
+  if(grepl("Clooney",g)){cnt = cnt + 3}
+  if(grepl("Murphy",g)){cnt = cnt + 1}
+  if(grepl("Crowe",g)){cnt = cnt + 2}
+  if(grepl("Gibson",g)){cnt = cnt + 1}
+  if(grepl("Lawerence",g)){cnt = cnt + 1}
+  if(grepl("Tom Hanks",g)){cnt = cnt + 3}
+  if(grepl("Carey",g)){cnt = cnt + 1}
+  if(grepl("Pitt",g)){cnt = cnt + 2}
+  if(grepl("Washington",g)){cnt = cnt + 2}
+  if(grepl("Smith",g)){cnt = cnt + 2}
+  if(grepl("DiCaprio",g)){cnt = cnt + 2}
+  if(grepl("Depp",g)){cnt = cnt + 2}
+  if(grepl("Ferrell",g)){cnt = cnt + 1}
+  if(grepl("Downey",g)){cnt = cnt + 1}
+  df_cat$ActorCnt[i] = cnt
+}
+df_cat$Actors <- NULL
+rm(i,g,cnt)
+names(df_cat)
+```
+
+
+```{r}
+# Feature Selection
+control = rfeControl(functions=rfFuncs, method="cv", number=5)
+results = rfe(df_cat[,!names(df_cat) %in% "Gross"], df_cat$Gross, sizes = c(1:dim(df_cat)[2]-1), rfeControl = control)
+print(results)
+predictors(results)
+plot(results, type=c("g","o"))
+df_cat <- df_cat[,names(df_cat) %in% results$optVariables]
+df_cat$Gross = df$Gross
+rm(results,control)
+```
+
+```{r}
+model3Power <- function(data = df_nums, train_perc = 1, iterations = 10){
+  numRecords = dim(data)[1]
+  numTrain = round(numRecords*train_perc)
+  trn_rmse_list = rep(0, times = 0)
+  tst_rmse_list = rep(0, times = 0)
+  for(i in seq(1:iterations)){
+    train_ind = sample(1:numRecords, size = numTrain)
+    train = data[train_ind,]
+    test = data[-train_ind,]
+    M = lm(Gross ~ . + I(Nominations^2) + I(ActorCnt^2) + I(DirectorCnt^2) + I(Wins^2) + I(Wins^3)  
+             #I(Nominations^3) + I(ActorCnt^3) + I(DirectorCnt^3)
+           , train)
+    trn_rmse_list[i] = sqrt(mean(residuals(M)^2))
+    predictions = predict(M,test)
+    tst_rmse_list[i] = sqrt(mean((test$Gross - predictions)^2))
+  }
+  train_rmse = mean(trn_rmse_list)
+  test_rmse = mean(tst_rmse_list)
+  return(as.data.frame(list(train_perc=train_perc,train_rmse=train_rmse,test_rmse=test_rmse)))
+}
+
+question3Power <- function(data = df_nums, iterations = 10){
+  q3 = model3Power(data, 0.05, iterations)
+  for(i in seq(0.1, 0.95, by = 0.05)){
+    a = rbind(q3, model3Power(data, i, iterations))
+    q3 = a
+  }
+  return(as.data.frame(q3, row.names = NULL))
+}
+```
+
+
+```{r}
+ggplot(data = question3Power(df_cat, 10), aes(x = train_perc)) +
+  geom_line(aes(y = train_rmse, color = 'train_rmse')) +
+  geom_line(aes(y = test_rmse, color = 'test_rmse')) +
+  labs(x = 'Training Data Size Percentage', y = 'RMSE', title = 'RMSE (Mean of 10 iterations: Train/Test) vs. Data Sizes')
+
+```
+
+```{r}
+ggplot(data = question3Power(df_cat, 1000), aes(x = train_perc)) +
+  geom_line(aes(y = train_rmse, color = 'train_rmse')) +
+  geom_line(aes(y = test_rmse, color = 'test_rmse')) +
+  labs(x = 'Training Data Size Percentage', y = 'RMSE', title = 'RMSE (Mean of 1000 iterations: Train/Test) vs. Data Sizes')
+```
+
+
+**Q**: Explain which categorical variables you used, and how you encoded them into features.
+
+**A**: I used several Binary Genre columns (plenty of these actually had the most information gain during the feature selection process), the converted total number of Wins/Nominations columns from the Awards columns (copied from Project 1), the month each movie was released (1-12), and a subset of top directors and actors columns (according to IMDB site and other cross-sources).  These columns were titled ActorCnt and DirectorCnt.  If a movie had an actor from the top actor list, or a director from the top director list (both from the 2000s onward to match the dataset), then this resulted in an addition to the ActorCnt/DirectorCnt entry for that particular movie.  Also, certain actors were rated more heavily than others to represent actors who historically do well at the box office.  This strategy was used to ultimately help see if this would help the linear regression model solidify certain movies who would Gross more money.  Movies with these actors and directors have historically grossed more money due to the popularity and ingenuity of these professional entertainers.  While these results weren't as good as question 2, they were still proved to be useful in question 3 to improve the RMSE results.
+
+## 4. Numeric and categorical variables
+
+Try to improve the prediction quality as much as possible by using both numeric and non-numeric variables from **Tasks 2 & 3**.
+
+```{r}
+# TODO: Build & evaluate model 4 (numeric & converted non-numeric variables)
+df_4 = cbind(df_nums,df_cat[,!names(df_cat) %in% "Gross"])
+```
+
+```{r}
+model4Power <- function(data = df_4, train_perc = 1, iterations = 10){
+  numRecords = dim(data)[1]
+  numTrain = round(numRecords*train_perc)
+  trn_rmse_list = rep(0, times = 0)
+  tst_rmse_list = rep(0, times = 0)
+  for(i in seq(1:iterations)){
+    train_ind = sample(1:numRecords, size = numTrain)
+    train = data[train_ind,]
+    test = data[-train_ind,]
+    M = lm(Gross ~ . + (Budget + imdbVotes)^2 + I(Budget^2) + I(Budget^3) + I(imdbVotes^2) +
+             I(Nominations^2) + I(ActorCnt^2) + I(DirectorCnt^2) + I(Wins^2) + I(Wins^3), train)
+    trn_rmse_list[i] = sqrt(mean(residuals(M)^2))
+    predictions = predict(M,test)
+    tst_rmse_list[i] = sqrt(mean((test$Gross - predictions)^2))
+  }
+  train_rmse = mean(trn_rmse_list)
+  test_rmse = mean(tst_rmse_list)
+  return(as.data.frame(list(train_perc=train_perc,train_rmse=train_rmse,test_rmse=test_rmse)))
+}
+
+question4Power <- function(data = df_4, iterations = 10){
+  q4 = model4Power(data, 0.05, iterations)
+  for(i in seq(0.1, 0.95, by = 0.05)){
+    a = rbind(q4, model4Power(data, i, iterations))
+    q4 = a
+  }
+  return(as.data.frame(q4, row.names = NULL))
+}
+```
+
+```{r}
+ggplot(data = question4Power(df_4, 10), aes(x = train_perc)) +
+  geom_line(aes(y = train_rmse, color = 'train_rmse')) +
+  geom_line(aes(y = test_rmse, color = 'test_rmse')) +
+  ylim(5e7,1.5e8) +
+  labs(x = 'Training Data Size Percentage', y = 'RMSE', title = 'RMSE (Mean of 10 iterations: Train/Test) vs. Data Sizes')
+```
+
+```{r}
+ggplot(data = question4Power(df_4, 500), aes(x = train_perc)) +
+  geom_line(aes(y = train_rmse, color = 'train_rmse')) +
+  geom_line(aes(y = test_rmse, color = 'test_rmse')) +
+  ylim(5e7,1.5e8) +
+  labs(x = 'Training Data Size Percentage', y = 'RMSE', title = 'RMSE (Mean of 500 iterations: Train/Test) vs. Data Sizes')
+```
+
+
+## 5. Additional features
+
+Now try creating additional features such as interactions (e.g. `is_genre_comedy` x `is_budget_greater_than_3M`) or deeper analysis of complex variables (e.g. text analysis of full-text columns like `Plot`).
+
+```{r}
+# TODO: Build & evaluate model 5 (numeric, non-numeric and additional features)
+df_both$ActionBudget = (df_both$Action==1 & df_both$Budget > 3e7)
+df_both$ComedyBudget = (df_both$Comedy==1 & df_both$Budget > 1e7)
+df_both$ReleaseBudget = ((df_both$Month_Released==5 | df_both$Month_Released==6 | df_both$Month_Released==11 |
+                            df_both$Month_Released==12) & df_both$Budget > 5e7)
+```
+
+```{r}
+model5Power <- function(data = df_both, train_perc = 1, iterations = 10){
+  numRecords = dim(data)[1]
+  numTrain = round(numRecords*train_perc)
+  trn_rmse_list = rep(0, times = 0)
+  tst_rmse_list = rep(0, times = 0)
+  for(i in seq(1:iterations)){
+    train_ind = sample(1:numRecords, size = numTrain)
+    train = data[train_ind,]
+    test = data[-train_ind,]
+    M = lm(Gross ~ . + (Budget + imdbVotes)^2 + I(Budget^2) + I(Budget^3) + I(imdbVotes^2) +
+             I(Nominations^2) + I(ActorCnt^2) + I(DirectorCnt^2) + I(Wins^2) + I(Wins^3) + 
+             ActionBudget + ComedyBudget + ReleaseBudget, train)
+    trn_rmse_list[i] = sqrt(mean(residuals(M)^2))
+    predictions = predict(M,test)
+    tst_rmse_list[i] = sqrt(mean((test$Gross - predictions)^2))
+  }
+  train_rmse = mean(trn_rmse_list)
+  test_rmse = mean(tst_rmse_list)
+  return(as.data.frame(list(train_perc=train_perc,train_rmse=train_rmse,test_rmse=test_rmse)))
+}
+
+question5Power <- function(data = df_both, iterations = 10){
+  q5 = model5Power(data, 0.05, iterations)
+  for(i in seq(0.1, 0.95, by = 0.05)){
+    a = rbind(q5, model5Power(data, i, iterations))
+    q5 = a
+  }
+  return(as.data.frame(q5, row.names = NULL))
+}
+
+```
+```{r}
+ggplot(data = question5Power(df_both, 10), aes(x = train_perc)) +
+  geom_line(aes(y = train_rmse, color = 'train_rmse')) +
+  geom_line(aes(y = test_rmse, color = 'test_rmse')) +
+  ylim(5e7,1.5e8) +
+  labs(x = 'Training Data Size Percentage', y = 'RMSE', title = 'RMSE (Mean of 10 iterations: Train/Test) vs. Data Sizes')
+```
+
+```{r}
+ggplot(data = question5Power(df_both, 500), aes(x = train_perc)) +
+  geom_line(aes(y = train_rmse, color = 'train_rmse')) +
+  geom_line(aes(y = test_rmse, color = 'test_rmse')) +
+  ylim(5e7,1.5e8) +
+  labs(x = 'Training Data Size Percentage', y = 'RMSE', title = 'RMSE (Mean of 500 iterations: Train/Test) vs. Data Sizes')
+```
+
+
+**Q**: Explain what new features you designed and why you chose them.
+
+**A**: I designed 3 new binary features: ActionBudget, ComedyBudget, and ReleaseBudget.  I strategically chose to have the binary values be true if two conditions were met.  All of these include Budget as Budget was one of the features that contained the most information throughout the feature selection in linear regression testing for all of this project.  If the Budget was over a specific threshold and the other condition was met, then the entry had a '1'.  These Budget values all varied depending on the other condition and the percenetage of the dataset the conditions covered.  The first two, ActionBudget and ComedyBudget, were simple to implement.  These two Genres were chosen due to their popularities within the dataset as a whole.  If Action or Comedy column were true, then the condtion was met for that half of the feature.  The last feature, ReleaseBudget, was decided with the help from the results from project 1.  Project 1 (Question 5) helped us learn that certain months (May, June, November, and December) had more potential to gross more than other months.  With this information, I conditioned this feature to only be true of the release month was either a 5, 6, 11, or 12.  With only these 3 columns, I was able to improve the Test RMSE results slighly.
